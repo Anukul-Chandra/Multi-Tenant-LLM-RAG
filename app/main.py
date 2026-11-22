@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, status
+from app.api.chat import router as chat_router
 from app.api.ingestion import router as ingestion_router
 from app.core import qdrant
 
@@ -9,6 +10,7 @@ app = FastAPI(
 )
 
 app.include_router(ingestion_router)
+app.include_router(chat_router)
 
 
 @app.get("/health")
