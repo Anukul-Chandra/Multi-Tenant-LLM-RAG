@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, status
+from app.api.ingestion import router as ingestion_router
 from app.core import qdrant
 
 app = FastAPI(
@@ -6,6 +7,8 @@ app = FastAPI(
     description="Production-grade RAG backend for Swiss Education LMS",
     version="0.1.0",
 )
+
+app.include_router(ingestion_router)
 
 
 @app.get("/health")

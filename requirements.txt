@@ -9,3 +9,4 @@ langchain-google-genai
 qdrant-client
 llama-parse
 python-multipart
+langchain-text-splitters
