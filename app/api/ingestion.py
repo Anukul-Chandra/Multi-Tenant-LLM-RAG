@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from app.ingestion.pipeline import ingest_pdf
@@ -10,8 +9,8 @@ router = APIRouter(prefix="/api/v1", tags=["Ingestion"])
 @router.post("/ingest")
 async def ingest_document(file: UploadFile = File(...)):
     """
-    Accepts an uploaded PDF file, saves it temporarily, parses and indexes
-    it into Qdrant, and cleans up temporary files in a finally block.
+    Accepts an uploaded PDF file, saves it temporarily with .pdf extension,
+    flushes and closes it, runs ingestion pipeline, and cleans up temp files in finally.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
@@ -21,10 +20,12 @@ async def ingest_document(file: UploadFile = File(...)):
 
     temp_file_path = None
     try:
-        suffix = os.path.splitext(file.filename)[1] or ".pdf"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            temp_file_path = tmp.name
+        content = await file.read()
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        temp_file_path = tmp.name
+        tmp.write(content)
+        tmp.flush()
+        tmp.close()
 
         result = await ingest_pdf(file_path=temp_file_path, filename=file.filename)
         return result
