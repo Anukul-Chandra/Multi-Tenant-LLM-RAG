@@ -10,14 +10,14 @@ from app.rag.state import GraphState
 
 # Fast grading & verification LLM
 groq_llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model=settings.GROQ_MODEL,
     temperature=0,
     api_key=settings.GROQ_API_KEY,
 )
 
 # High-accuracy answer generation LLM
 gemini_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_MODEL,
     temperature=0,
     google_api_key=settings.GEMINI_API_KEY,
 )
@@ -30,10 +30,39 @@ embeddings = GoogleGenerativeAIEmbeddings(
 )
 
 
+# Node: rewrite_query
+async def rewrite_query(state: GraphState) -> Dict[str, Any]:
+    question = state["question"]
+    chat_history = state.get("chat_history") or []
+
+    if not chat_history:
+        return {"rewritten_question": question}
+
+    recent_history = chat_history[-4:]
+    formatted_history = "\n".join(
+        [f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}" for msg in recent_history]
+    )
+
+    prompt = (
+        "You are an expert search query rewriter for an educational LMS RAG system.\n"
+        "Given the conversation history and a follow-up question, rewrite the follow-up question "
+        "into a standalone search query that contains all necessary context for document retrieval.\n\n"
+        f"Conversation History:\n{formatted_history}\n\n"
+        f"Follow-up Question: {question}\n\n"
+        "Rules:\n"
+        "- Return ONLY the rewritten search query text.\n"
+        "- Do not include explanations, quotes, preambles, or prefixes.\n"
+        "- If the question is already clear and standalone, return it as is."
+    )
+    response = await groq_llm.ainvoke(prompt)
+    rewritten = str(response.content).strip().strip('"').strip("'")
+    return {"rewritten_question": rewritten if rewritten else question}
+
+
 # Node a: retrieve
 async def retrieve(state: GraphState) -> Dict[str, Any]:
-    question = state["question"]
-    query_vector = await embeddings.aembed_query(question)
+    query_text = state.get("rewritten_question") or state["question"]
+    query_vector = await embeddings.aembed_query(query_text)
 
     if hasattr(client, "query_points"):
         search_result = client.query_points(
@@ -64,7 +93,7 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
 
 # Node b: grade_documents (CRAG)
 async def grade_documents(state: GraphState) -> Dict[str, Any]:
-    question = state["question"]
+    query_text = state.get("rewritten_question") or state["question"]
     documents = state.get("documents", [])
     relevant_docs = []
 
@@ -72,7 +101,7 @@ async def grade_documents(state: GraphState) -> Dict[str, Any]:
         prompt = (
             "You are a grader assessing relevance of a retrieved document to a user question.\n"
             f"Retrieved Document:\n{doc['text']}\n\n"
-            f"User Question:\n{question}\n\n"
+            f"User Question:\n{query_text}\n\n"
             "If the document contains information or keywords relevant to the question, respond strictly with 'yes'. "
             "Otherwise, respond strictly with 'no'. Do not include explanations."
         )
@@ -154,14 +183,16 @@ def route_after_hallucination(state: GraphState) -> str:
 # Build and compile StateGraph
 workflow = StateGraph(GraphState)
 
+workflow.add_node("rewrite_query", rewrite_query)
 workflow.add_node("retrieve", retrieve)
 workflow.add_node("grade_documents", grade_documents)
 workflow.add_node("generate", generate)
 workflow.add_node("check_hallucination", check_hallucination)
 workflow.add_node("fallback", fallback)
 
-# Wire edges
-workflow.add_edge(START, "retrieve")
+# Wire edges: START -> rewrite_query -> retrieve -> grade_documents -> ...
+workflow.add_edge(START, "rewrite_query")
+workflow.add_edge("rewrite_query", "retrieve")
 workflow.add_edge("retrieve", "grade_documents")
 workflow.add_conditional_edges(
     "grade_documents",

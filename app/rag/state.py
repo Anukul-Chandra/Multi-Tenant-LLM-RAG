@@ -3,6 +3,8 @@ from typing import Any, Dict, List, TypedDict
 
 class GraphState(TypedDict):
     question: str
+    chat_history: List[Dict[str, str]]
+    rewritten_question: str
     documents: List[Dict[str, Any]]
     generation: str
     sources: List[str]
