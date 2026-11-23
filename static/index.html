@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swiss LMS & Portfolio RAG</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col font-sans overflow-hidden">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-4 shadow-sm z-10">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 bg-red-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
+        +
+      </div>
+      <div>
+        <h1 class="text-lg font-bold text-slate-900 tracking-tight leading-tight flex items-center gap-2">
+          Swiss LMS & Portfolio RAG
+          <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+            CRAG + Self-RAG
+          </span>
+        </h1>
+        <p class="text-xs text-slate-500">Multimodal • Multi-Tenant • Fast & Lightweight</p>
+      </div>
+    </div>
+
+    <!-- Project Selector & Quick Switch -->
+    <div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-sm">
+      <span class="text-xs font-semibold text-slate-500 px-2 uppercase tracking-wider">Project:</span>
+      <button onclick="setProject('swiss_lms')" id="btn-swiss_lms" class="px-3 py-1 rounded-lg text-xs font-medium transition-all bg-white text-slate-900 shadow-sm border border-slate-200">
+        swiss_lms
+      </button>
+      <button onclick="setProject('portfolio')" id="btn-portfolio" class="px-3 py-1 rounded-lg text-xs font-medium transition-all text-slate-600 hover:text-slate-900">
+        portfolio
+      </button>
+      <div class="h-4 w-px bg-slate-300 mx-1"></div>
+      <input type="text" id="customProjectInput" placeholder="Custom Project ID" 
+             class="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 w-36"
+             onchange="setProject(this.value)">
+    </div>
+  </header>
+
+  <!-- Main Body Layout -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Left Sidebar: Knowledge Base & Document Management -->
+    <aside class="w-80 md:w-96 bg-white border-r border-slate-200 flex flex-col justify-between shrink-0">
+      
+      <!-- Upload Section -->
+      <div class="p-5 border-b border-slate-100">
+        <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+          </svg>
+          Ingest Document
+        </h2>
+        <p class="text-xs text-slate-500 mb-3">Upload PDF syllabus, guide, or resume into <span id="currentProjectBadge" class="font-semibold text-slate-700">swiss_lms</span>.</p>
+
+        <form id="uploadForm" class="space-y-3">
+          <div class="border-2 border-dashed border-slate-200 hover:border-slate-400 rounded-xl p-3 text-center transition-colors cursor-pointer relative bg-slate-50/50">
+            <input type="file" id="pdfFileInput" accept=".pdf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="updateFileLabel()">
+            <div id="fileLabelText" class="text-xs text-slate-600 font-medium truncate">
+              Click to select a PDF file
+            </div>
+            <p class="text-[10px] text-slate-400 mt-0.5">Parsed via LlamaParse / pypdf</p>
+          </div>
+
+          <button type="submit" id="uploadBtn" class="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50">
+            <span>Upload PDF</span>
+          </button>
+        </form>
+
+        <div id="uploadStatus" class="mt-2 text-xs font-medium hidden"></div>
+      </div>
+
+      <!-- Document List Section -->
+      <div class="flex-1 overflow-y-auto p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            Indexed Documents
+          </h3>
+          <span id="docCount" class="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200">
+            0 files
+          </span>
+        </div>
+
+        <ul id="documentsList" class="space-y-2">
+          <!-- Document items populated dynamically -->
+        </ul>
+      </div>
+
+      <!-- Footer Info -->
+      <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-[11px] text-slate-400">
+        Qdrant Cloud • Gemini 768-dim Embeddings
+      </div>
+    </aside>
+
+    <!-- Right Main Panel: Conversational RAG Chat -->
+    <main class="flex-1 flex flex-col bg-slate-100 relative">
+      
+      <!-- Session Bar -->
+      <div class="bg-white/80 backdrop-blur-sm border-b border-slate-200 px-6 py-2 flex items-center justify-between text-xs text-slate-500">
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>Targeting project: <strong id="chatProjectLabel" class="text-slate-800">swiss_lms</strong></span>
+        </div>
+        <div>
+          <span>Session: <code id="sessionLabel" class="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-600"></code></span>
+        </div>
+      </div>
+
+      <!-- Messages Area -->
+      <div id="chatMessages" class="flex-1 overflow-y-auto p-6 space-y-4">
+        <!-- Welcome Message -->
+        <div class="flex items-start gap-3 max-w-2xl">
+          <div class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+            AI
+          </div>
+          <div class="bg-white p-4 rounded-2xl rounded-tl-sm border border-slate-200 shadow-sm text-sm text-slate-700 leading-relaxed">
+            <p class="font-semibold text-slate-900 mb-1">Welcome to Swiss LMS RAG Assistant!</p>
+            <p class="text-slate-600 mb-2">
+              Ask any question about documents in this project. Our pipeline uses:
+            </p>
+            <ul class="list-disc list-inside text-xs space-y-1 text-slate-500">
+              <li><strong>Conversational Query Rewriting</strong> with Groq (Qwen)</li>
+              <li><strong>Corrective RAG (CRAG)</strong> document grading</li>
+              <li><strong>Strict Synthesis</strong> with Gemini Flash</li>
+              <li><strong>Self-RAG Hallucination Verification</strong> for 100% grounded answers</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input Bar -->
+      <div class="p-4 bg-white border-t border-slate-200">
+        <form id="chatForm" class="max-w-4xl mx-auto flex gap-2 items-center">
+          <input 
+            type="text" 
+            id="questionInput" 
+            placeholder="Ask a question about your documents..."
+            autocomplete="off"
+            class="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:bg-white transition-all shadow-inner"
+          >
+          <button 
+            type="submit" 
+            id="sendBtn" 
+            class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm rounded-xl shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <span>Send</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+            </svg>
+          </button>
+        </form>
+      </div>
+
+    </main>
+
+  </div>
+
+  <script>
+    // State
+    let currentProject = "swiss_lms";
+    let sessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+
+    document.getElementById("sessionLabel").innerText = sessionId;
+
+    function setProject(proj) {
+      if (!proj || !proj.trim()) return;
+      currentProject = proj.trim();
+
+      // Update button highlights
+      document.getElementById("btn-swiss_lms").className = currentProject === "swiss_lms" 
+        ? "px-3 py-1 rounded-lg text-xs font-medium transition-all bg-white text-slate-900 shadow-sm border border-slate-200" 
+        : "px-3 py-1 rounded-lg text-xs font-medium transition-all text-slate-600 hover:text-slate-900";
+
+      document.getElementById("btn-portfolio").className = currentProject === "portfolio" 
+        ? "px-3 py-1 rounded-lg text-xs font-medium transition-all bg-white text-slate-900 shadow-sm border border-slate-200" 
+        : "px-3 py-1 rounded-lg text-xs font-medium transition-all text-slate-600 hover:text-slate-900";
+
+      if (currentProject !== "swiss_lms" && currentProject !== "portfolio") {
+        document.getElementById("customProjectInput").value = currentProject;
+      } else {
+        document.getElementById("customProjectInput").value = "";
+      }
+
+      document.getElementById("currentProjectBadge").innerText = currentProject;
+      document.getElementById("chatProjectLabel").innerText = currentProject;
+
+      // Reset chat and session
+      sessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+      document.getElementById("sessionLabel").innerText = sessionId;
+      resetChatArea();
+
+      // Refresh documents
+      loadDocuments();
+    }
+
+    function resetChatArea() {
+      const chat = document.getElementById("chatMessages");
+      chat.innerHTML = `
+        <div class="flex items-start gap-3 max-w-2xl">
+          <div class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+            AI
+          </div>
+          <div class="bg-white p-4 rounded-2xl rounded-tl-sm border border-slate-200 shadow-sm text-sm text-slate-700 leading-relaxed">
+            <p class="font-semibold text-slate-900 mb-1">Switched to project: <span class="text-emerald-700">${escapeHtml(currentProject)}</span></p>
+            <p class="text-xs text-slate-500">Chat history cleared. Ask questions specifically targeting documents indexed under this project.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateFileLabel() {
+      const fileInput = document.getElementById("pdfFileInput");
+      const label = document.getElementById("fileLabelText");
+      if (fileInput.files.length > 0) {
+        label.innerText = fileInput.files[0].name;
+        label.classList.add("text-slate-900", "font-semibold");
+      } else {
+        label.innerText = "Click to select a PDF file";
+        label.classList.remove("text-slate-900", "font-semibold");
+      }
+    }
+
+    // Load Document List
+    async function loadDocuments() {
+      const listEl = document.getElementById("documentsList");
+      const countEl = document.getElementById("docCount");
+      listEl.innerHTML = `<li class="text-xs text-slate-400 py-2 text-center">Loading documents...</li>`;
+
+      try {
+        const res = await fetch(`/api/v1/documents?project_id=${encodeURIComponent(currentProject)}`);
+        const data = await res.json();
+        
+        if (res.ok && data.documents) {
+          countEl.innerText = `${data.documents.length} file${data.documents.length === 1 ? '' : 's'}`;
+          if (data.documents.length === 0) {
+            listEl.innerHTML = `<li class="text-xs text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-xl">No documents yet</li>`;
+            return;
+          }
+
+          listEl.innerHTML = data.documents.map(doc => `
+            <li class="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-xs group">
+              <div class="flex items-center gap-2 overflow-hidden">
+                <span class="text-red-500 font-bold shrink-0">PDF</span>
+                <span class="truncate font-medium text-slate-700" title="${escapeHtml(doc)}">${escapeHtml(doc)}</span>
+              </div>
+              <button onclick="deleteDocument('${escapeHtml(doc)}')" class="text-slate-400 hover:text-red-600 px-1.5 py-0.5 rounded transition-colors text-[11px] font-medium" title="Delete from project">
+                Delete
+              </button>
+            </li>
+          `).join('');
+        } else {
+          listEl.innerHTML = `<li class="text-xs text-red-500 py-2 text-center">Failed to load documents</li>`;
+        }
+      } catch (err) {
+        listEl.innerHTML = `<li class="text-xs text-red-500 py-2 text-center">Error connecting to server</li>`;
+      }
+    }
+
+    // Delete Document
+    async function deleteDocument(filename) {
+      if (!confirm(`Delete "${filename}" from project "${currentProject}"?`)) return;
+      try {
+        const res = await fetch(`/api/v1/documents/${encodeURIComponent(filename)}?project_id=${encodeURIComponent(currentProject)}`, {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          loadDocuments();
+        } else {
+          alert("Failed to delete document.");
+        }
+      } catch (err) {
+        alert("Error connecting to server.");
+      }
+    }
+
+    // Upload PDF
+    document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fileInput = document.getElementById("pdfFileInput");
+      const statusEl = document.getElementById("uploadStatus");
+      const uploadBtn = document.getElementById("uploadBtn");
+
+      if (!fileInput.files.length) {
+        alert("Please select a PDF file first.");
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("project_id", currentProject);
+
+      uploadBtn.disabled = true;
+      uploadBtn.innerHTML = `
+        <svg class="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span>Ingesting & Chunking...</span>
+      `;
+      statusEl.className = "mt-2 text-xs font-medium text-slate-500 block";
+      statusEl.innerText = "Parsing document via LlamaParse/pypdf...";
+
+      try {
+        const res = await fetch("/api/v1/ingest", {
+          method: "POST",
+          body: formData
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          statusEl.className = "mt-2 text-xs font-medium text-emerald-600 block";
+          statusEl.innerText = `✅ Ingested "${data.filename}" (${data.chunks_indexed} chunks)`;
+          fileInput.value = "";
+          updateFileLabel();
+          loadDocuments();
+        } else {
+          statusEl.className = "mt-2 text-xs font-medium text-red-600 block";
+          statusEl.innerText = `❌ Error: ${data.detail || "Upload failed"}`;
+        }
+      } catch (err) {
+        statusEl.className = "mt-2 text-xs font-medium text-red-600 block";
+        statusEl.innerText = `❌ Network error`;
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = `<span>Upload PDF</span>`;
+      }
+    });
+
+    // Chat
+    document.getElementById("chatForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("questionInput");
+      const question = input.value.trim();
+      if (!question) return;
+
+      appendUserMessage(question);
+      input.value = "";
+
+      const sendBtn = document.getElementById("sendBtn");
+      sendBtn.disabled = true;
+      const placeholderId = appendThinkingMessage();
+
+      try {
+        const res = await fetch("/api/v1/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: question,
+            project_id: currentProject,
+            session_id: sessionId
+          })
+        });
+
+        const data = await res.json();
+        removeMessage(placeholderId);
+
+        if (res.ok) {
+          appendAIMessage(data);
+        } else {
+          appendErrorMessage(data.detail || "Error generating response");
+        }
+      } catch (err) {
+        removeMessage(placeholderId);
+        appendErrorMessage("Network error communicating with RAG backend.");
+      } finally {
+        sendBtn.disabled = false;
+        document.getElementById("chatMessages").scrollTop = document.getElementById("chatMessages").scrollHeight;
+      }
+    });
+
+    function appendUserMessage(text) {
+      const container = document.getElementById("chatMessages");
+      const msg = document.createElement("div");
+      msg.className = "flex justify-end";
+      msg.innerHTML = `
+        <div class="max-w-xl bg-slate-900 text-white px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm shadow-sm leading-relaxed">
+          ${escapeHtml(text)}
+        </div>
+      `;
+      container.appendChild(msg);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function appendThinkingMessage() {
+      const id = "think_" + Math.random().toString(36).substring(2, 8);
+      const container = document.getElementById("chatMessages");
+      const msg = document.createElement("div");
+      msg.id = id;
+      msg.className = "flex items-start gap-3 max-w-2xl";
+      msg.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+          AI
+        </div>
+        <div class="bg-white p-3.5 rounded-2xl rounded-tl-sm border border-slate-200 shadow-sm text-xs text-slate-500 flex items-center gap-2">
+          <svg class="animate-spin h-3.5 w-3.5 text-slate-700" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          <span>Searching Qdrant & verifying grounding...</span>
+        </div>
+      `;
+      container.appendChild(msg);
+      container.scrollTop = container.scrollHeight;
+      return id;
+    }
+
+    function removeMessage(id) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    }
+
+    function appendAIMessage(data) {
+      const container = document.getElementById("chatMessages");
+      const msg = document.createElement("div");
+      msg.className = "flex items-start gap-3 max-w-2xl";
+
+      const groundedBadge = data.grounded 
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+             ✓ Grounded
+           </span>`
+        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+             ⚠ Unverified / Fallback
+           </span>`;
+
+      const sourcesList = (data.sources && data.sources.length > 0)
+        ? data.sources.map(s => `
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+              📄 ${escapeHtml(s)}
+            </span>
+          `).join('')
+        : `<span class="text-[11px] text-slate-400">None</span>`;
+
+      const rewriteNotice = (data.rewritten_question && data.rewritten_question !== data.question)
+        ? `<div class="mt-2 text-[11px] text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+             <span class="font-semibold text-slate-500">Query rewritten as:</span> "${escapeHtml(data.rewritten_question)}"
+           </div>`
+        : '';
+
+      msg.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+          AI
+        </div>
+        <div class="bg-white p-4 rounded-2xl rounded-tl-sm border border-slate-200 shadow-sm text-sm text-slate-800 leading-relaxed space-y-3">
+          <div class="whitespace-pre-wrap">${escapeHtml(data.answer)}</div>
+          
+          <div class="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2">
+            ${groundedBadge}
+            <span class="text-xs text-slate-400">| Sources:</span>
+            <div class="flex flex-wrap gap-1">
+              ${sourcesList}
+            </div>
+          </div>
+          ${rewriteNotice}
+        </div>
+      `;
+
+      container.appendChild(msg);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function appendErrorMessage(errorText) {
+      const container = document.getElementById("chatMessages");
+      const msg = document.createElement("div");
+      msg.className = "flex items-start gap-3 max-w-2xl";
+      msg.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+          !
+        </div>
+        <div class="bg-red-50 text-red-800 p-3.5 rounded-2xl rounded-tl-sm border border-red-200 text-xs shadow-sm">
+          <strong>Error:</strong> ${escapeHtml(errorText)}
+        </div>
+      `;
+      container.appendChild(msg);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // Initial load on page ready
+    loadDocuments();
+  </script>
+</body>
+</html>
