@@ -12,13 +12,14 @@ SESSION_STORE: Dict[str, List[Dict[str, str]]] = {}
 class ChatRequest(BaseModel):
     question: str
     session_id: str = "default"
+    project_id: str = "default"
 
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """
-    Executes the CRAG + Self-RAG pipeline with conversational memory and query rewriting.
-    Stores up to 6 recent messages per session in-memory.
+    Executes the CRAG + Self-RAG pipeline with conversational memory,
+    query rewriting, and multi-tenant project_id isolation.
     """
     if not request.question or not request.question.strip():
         raise HTTPException(
@@ -28,6 +29,7 @@ async def chat(request: ChatRequest):
 
     try:
         session_id = request.session_id.strip() if request.session_id else "default"
+        project_id = request.project_id.strip() if request.project_id else "default"
         chat_history = list(SESSION_STORE.get(session_id, []))
 
         initial_state = {
@@ -38,6 +40,7 @@ async def chat(request: ChatRequest):
             "generation": "",
             "sources": [],
             "is_grounded": False,
+            "project_id": project_id,
         }
 
         final_state = await rag_app.ainvoke(initial_state)

@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
+from qdrant_client import models
 
 from app.core.config import settings
 from app.core.qdrant import COLLECTION_NAME, client
@@ -65,12 +66,24 @@ async def rewrite_query(state: GraphState) -> Dict[str, Any]:
 # Node a: retrieve
 async def retrieve(state: GraphState) -> Dict[str, Any]:
     query_text = state.get("rewritten_question") or state["question"]
+    project_id = state.get("project_id") or "default"
     query_vector = await embeddings.aembed_query(query_text)
+
+    # Strict multi-tenancy isolation filter on project_id
+    query_filter = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="project_id",
+                match=models.MatchValue(value=project_id),
+            )
+        ]
+    )
 
     if hasattr(client, "query_points"):
         search_result = client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
+            query_filter=query_filter,
             limit=4,
             with_payload=True,
         )
@@ -79,6 +92,7 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
         points = client.search(
             collection_name=COLLECTION_NAME,
             query_vector=query_vector,
+            query_filter=query_filter,
             limit=4,
             with_payload=True,
         )

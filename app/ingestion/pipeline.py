@@ -13,11 +13,11 @@ from app.core.qdrant import COLLECTION_NAME, client, ensure_collection_exists
 logger = logging.getLogger(__name__)
 
 
-async def ingest_pdf(file_path: str, filename: str) -> Dict[str, Any]:
+async def ingest_pdf(file_path: str, filename: str, project_id: str = "default") -> Dict[str, Any]:
     """
     Asynchronously parses a PDF using LlamaParse (with pypdf fallback),
     splits text into chunks, generates 768-dim embeddings with Gemini,
-    and upserts them into Qdrant.
+    and upserts them into Qdrant with project_id isolation.
     """
     if not settings.GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is missing. Please configure it in .env.")
@@ -49,7 +49,7 @@ async def ingest_pdf(file_path: str, filename: str) -> Dict[str, Any]:
             print(f"[Ingestion] Warning: {warning_msg}")
             logger.warning(warning_msg)
     else:
-        warning_msg = f"LlamaParse failed/empty, falling back to pypdf (LLAMA_CLOUD_API_KEY not configured)."
+        warning_msg = "LlamaParse failed/empty, falling back to pypdf (LLAMA_CLOUD_API_KEY not configured)."
         print(f"[Ingestion] Warning: {warning_msg}")
         logger.warning(warning_msg)
 
@@ -100,6 +100,7 @@ async def ingest_pdf(file_path: str, filename: str) -> Dict[str, Any]:
                 "text": chunk,
                 "source": filename,
                 "chunk_index": idx,
+                "project_id": project_id,
             },
         )
         for idx, (chunk, vector) in enumerate(zip(chunks, vectors))
@@ -113,4 +114,5 @@ async def ingest_pdf(file_path: str, filename: str) -> Dict[str, Any]:
     return {
         "filename": filename,
         "chunks_indexed": len(chunks),
+        "project_id": project_id,
     }

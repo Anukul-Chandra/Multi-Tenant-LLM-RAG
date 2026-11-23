@@ -9,3 +9,4 @@ class GraphState(TypedDict):
     generation: str
     sources: List[str]
     is_grounded: bool
+    project_id: str
