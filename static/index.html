@@ -31,6 +31,38 @@
 </head>
 <body class="bg-slate-50 text-slate-800 h-screen flex flex-col font-sans overflow-hidden">
 
+  <!-- Admin Authentication Overlay -->
+  <div id="adminOverlay" class="fixed inset-0 bg-slate-900/85 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-all">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center">
+      <div class="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center text-white font-bold text-2xl mx-auto mb-3 shadow-md">
+        +
+      </div>
+      <h2 class="text-base font-bold text-slate-900 mb-1">Admin Access Required</h2>
+      <p class="text-xs text-slate-500 mb-4 leading-relaxed">
+        Please enter your <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-mono">ADMIN_API_KEY</code> to manage documents and knowledge bases.
+      </p>
+
+      <form id="adminLoginForm" class="space-y-3" onsubmit="handleAdminLogin(event)">
+        <input 
+          type="password" 
+          id="adminKeyInput" 
+          placeholder="Enter Admin API Key..."
+          autocomplete="current-password"
+          required
+          class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 focus:bg-white text-center font-mono tracking-wider transition-all"
+        />
+        <div id="adminLoginError" class="text-xs text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hidden font-medium text-left"></div>
+        <button 
+          type="submit" 
+          id="unlockBtn" 
+          class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2"
+        >
+          <span>Unlock Dashboard</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
   <!-- Top Navigation Bar -->
   <header class="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-4 shadow-sm z-10">
     <div class="flex items-center space-x-3">
@@ -48,19 +80,29 @@
       </div>
     </div>
 
-    <!-- Project Selector & Quick Switch -->
-    <div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-sm">
-      <span class="text-xs font-semibold text-slate-500 px-2 uppercase tracking-wider">Project:</span>
-      <button onclick="setProject('swiss_lms')" id="btn-swiss_lms" class="px-3 py-1 rounded-lg text-xs font-medium transition-all bg-white text-slate-900 shadow-sm border border-slate-200">
-        swiss_lms
+    <!-- Project Selector & Admin Controls -->
+    <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-sm">
+        <span class="text-xs font-semibold text-slate-500 px-2 uppercase tracking-wider">Project:</span>
+        <button onclick="setProject('swiss_lms')" id="btn-swiss_lms" class="px-3 py-1 rounded-lg text-xs font-medium transition-all bg-white text-slate-900 shadow-sm border border-slate-200">
+          swiss_lms
+        </button>
+        <button onclick="setProject('portfolio')" id="btn-portfolio" class="px-3 py-1 rounded-lg text-xs font-medium transition-all text-slate-600 hover:text-slate-900">
+          portfolio
+        </button>
+        <div class="h-4 w-px bg-slate-300 mx-1"></div>
+        <input type="text" id="customProjectInput" placeholder="Custom Project ID" 
+               class="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 w-36"
+               onchange="setProject(this.value)">
+      </div>
+
+      <!-- Lock / Logout Button -->
+      <button onclick="lockDashboard()" class="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition-colors border border-slate-200" title="Lock Admin Session">
+        <svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+        </svg>
+        <span>Lock</span>
       </button>
-      <button onclick="setProject('portfolio')" id="btn-portfolio" class="px-3 py-1 rounded-lg text-xs font-medium transition-all text-slate-600 hover:text-slate-900">
-        portfolio
-      </button>
-      <div class="h-4 w-px bg-slate-300 mx-1"></div>
-      <input type="text" id="customProjectInput" placeholder="Custom Project ID" 
-             class="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 w-36"
-             onchange="setProject(this.value)">
     </div>
   </header>
 
@@ -149,6 +191,7 @@
               Ask any question about documents in this project. Our pipeline uses:
             </p>
             <ul class="list-disc list-inside text-xs space-y-1 text-slate-500">
+              <li><strong>Zero-Latency Intent Routing</strong> for instant conversational pleasantries</li>
               <li><strong>Conversational Query Rewriting</strong> with Groq (Qwen)</li>
               <li><strong>Corrective RAG (CRAG)</strong> document grading</li>
               <li><strong>Strict Synthesis</strong> with Gemini Flash (fallback to Groq)</li>
@@ -189,8 +232,97 @@
     // State
     let currentProject = "swiss_lms";
     let sessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+    const ADMIN_STORAGE_KEY = "swiss_rag_admin_key";
 
     document.getElementById("sessionLabel").innerText = sessionId;
+
+    // Admin Auth Helpers
+    function getAdminKey() {
+      return sessionStorage.getItem(ADMIN_STORAGE_KEY) || "";
+    }
+
+    function showAdminOverlay(errorMsg = null) {
+      const overlay = document.getElementById("adminOverlay");
+      const errEl = document.getElementById("adminLoginError");
+      overlay.classList.remove("hidden");
+      if (errorMsg) {
+        errEl.innerText = errorMsg;
+        errEl.classList.remove("hidden");
+      } else {
+        errEl.classList.add("hidden");
+      }
+      setTimeout(() => {
+        document.getElementById("adminKeyInput").focus();
+      }, 50);
+    }
+
+    function hideAdminOverlay() {
+      document.getElementById("adminOverlay").classList.add("hidden");
+      document.getElementById("adminLoginError").classList.add("hidden");
+    }
+
+    function lockDashboard() {
+      sessionStorage.removeItem(ADMIN_STORAGE_KEY);
+      document.getElementById("adminKeyInput").value = "";
+      document.getElementById("documentsList").innerHTML = "";
+      document.getElementById("docCount").innerText = "0 files";
+      showAdminOverlay();
+    }
+
+    async function handleAdminLogin(e) {
+      e.preventDefault();
+      const input = document.getElementById("adminKeyInput");
+      const key = input.value.trim();
+      const errEl = document.getElementById("adminLoginError");
+      const btn = document.getElementById("unlockBtn");
+
+      if (!key) return;
+
+      btn.disabled = true;
+      btn.innerHTML = `<span>Verifying Key...</span>`;
+      errEl.classList.add("hidden");
+
+      try {
+        const res = await fetch("/api/v1/admin/verify", {
+          method: "POST",
+          headers: { "X-Admin-Key": key }
+        });
+
+        if (res.ok) {
+          sessionStorage.setItem(ADMIN_STORAGE_KEY, key);
+          hideAdminOverlay();
+          input.value = "";
+          loadDocuments();
+        } else {
+          errEl.innerText = "Invalid Admin API Key. Please verify your credentials.";
+          errEl.classList.remove("hidden");
+        }
+      } catch (err) {
+        errEl.innerText = "Network error connecting to backend.";
+        errEl.classList.remove("hidden");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<span>Unlock Dashboard</span>`;
+      }
+    }
+
+    // Authenticated Fetch wrapper
+    async function authFetch(url, options = {}) {
+      const key = getAdminKey();
+      options.headers = options.headers || {};
+      if (options.headers instanceof Headers) {
+        options.headers.set("X-Admin-Key", key);
+      } else {
+        options.headers["X-Admin-Key"] = key;
+      }
+
+      const res = await fetch(url, options);
+      if (res.status === 401) {
+        sessionStorage.removeItem(ADMIN_STORAGE_KEY);
+        showAdminOverlay("Admin session expired or invalid key. Please log in.");
+      }
+      return res;
+    }
 
     // Lightweight Markdown Formatter
     function formatMarkdown(text) {
@@ -259,8 +391,10 @@
       document.getElementById("sessionLabel").innerText = sessionId;
       resetChatArea();
 
-      // Refresh documents
-      loadDocuments();
+      // Refresh documents if authenticated
+      if (getAdminKey()) {
+        loadDocuments();
+      }
     }
 
     function resetChatArea() {
@@ -290,14 +424,20 @@
       }
     }
 
-    // Load Document List
+    // Load Document List with Authentication
     async function loadDocuments() {
+      if (!getAdminKey()) {
+        showAdminOverlay();
+        return;
+      }
+
       const listEl = document.getElementById("documentsList");
       const countEl = document.getElementById("docCount");
       listEl.innerHTML = `<li class="text-xs text-slate-400 py-2 text-center">Loading documents...</li>`;
 
       try {
-        const res = await fetch(`/api/v1/documents?project_id=${encodeURIComponent(currentProject)}`);
+        const res = await authFetch(`/api/v1/documents?project_id=${encodeURIComponent(currentProject)}`);
+        if (res.status === 401) return;
         const data = await res.json();
         
         if (res.ok && data.documents) {
@@ -326,13 +466,14 @@
       }
     }
 
-    // Delete Document
+    // Delete Document with Authentication
     async function deleteDocument(filename) {
       if (!confirm(`Delete "${filename}" from project "${currentProject}"?`)) return;
       try {
-        const res = await fetch(`/api/v1/documents/${encodeURIComponent(filename)}?project_id=${encodeURIComponent(currentProject)}`, {
+        const res = await authFetch(`/api/v1/documents/${encodeURIComponent(filename)}?project_id=${encodeURIComponent(currentProject)}`, {
           method: 'DELETE'
         });
+        if (res.status === 401) return;
         if (res.ok) {
           loadDocuments();
         } else {
@@ -343,7 +484,7 @@
       }
     }
 
-    // Upload PDF
+    // Upload PDF with Authentication
     document.getElementById("uploadForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const fileInput = document.getElementById("pdfFileInput");
@@ -372,10 +513,11 @@
       statusEl.innerText = "Parsing document via LlamaParse/pypdf...";
 
       try {
-        const res = await fetch("/api/v1/ingest", {
+        const res = await authFetch("/api/v1/ingest", {
           method: "POST",
           body: formData
         });
+        if (res.status === 401) return;
         const data = await res.json();
 
         if (res.ok) {
@@ -397,7 +539,7 @@
       }
     });
 
-    // Chat Submit
+    // Public Chat (No Auth Required)
     document.getElementById("chatForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const input = document.getElementById("questionInput");
@@ -555,8 +697,13 @@
         .replace(/'/g, "&#039;");
     }
 
-    // Initial load on page ready
-    loadDocuments();
+    // Initial check on page load
+    if (getAdminKey()) {
+      hideAdminOverlay();
+      loadDocuments();
+    } else {
+      showAdminOverlay();
+    }
   </script>
 </body>
 </html>

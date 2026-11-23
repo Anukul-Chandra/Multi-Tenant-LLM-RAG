@@ -1,16 +1,25 @@
 import os
 import tempfile
 from typing import Any, Dict
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from qdrant_client import models
 
 from app.core.qdrant import COLLECTION_NAME, client, ensure_collection_exists
+from app.core.security import verify_admin
 from app.ingestion.pipeline import ingest_pdf
 
-router = APIRouter(prefix="/api/v1", tags=["Ingestion"])
+router = APIRouter(prefix="/api/v1", tags=["Ingestion & Admin"])
 
 
-@router.post("/ingest")
+@router.post("/admin/verify", dependencies=[Depends(verify_admin)])
+async def verify_admin_key() -> Dict[str, str]:
+    """
+    Validates that the provided X-Admin-Key is authentic and has admin privileges.
+    """
+    return {"status": "authenticated"}
+
+
+@router.post("/ingest", dependencies=[Depends(verify_admin)])
 async def ingest_document(
     file: UploadFile = File(...),
     project_id: str = Form("default"),
@@ -18,6 +27,7 @@ async def ingest_document(
     """
     Accepts an uploaded PDF file and project_id, saves it temporarily with .pdf extension,
     flushes and closes it, runs ingestion pipeline, and cleans up temp files in finally.
+    Requires valid X-Admin-Key header.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
@@ -56,10 +66,11 @@ async def ingest_document(
         await file.close()
 
 
-@router.get("/documents")
+@router.get("/documents", dependencies=[Depends(verify_admin)])
 async def list_documents(project_id: str = "default") -> Dict[str, Any]:
     """
     Scrolls Qdrant points filtered by project_id and returns unique source filenames.
+    Requires valid X-Admin-Key header.
     """
     try:
         ensure_collection_exists()
@@ -102,10 +113,11 @@ async def list_documents(project_id: str = "default") -> Dict[str, Any]:
         )
 
 
-@router.delete("/documents/{filename}")
+@router.delete("/documents/{filename}", dependencies=[Depends(verify_admin)])
 async def delete_document(filename: str, project_id: str = "default") -> Dict[str, Any]:
     """
     Deletes all points in Qdrant matching BOTH project_id and source == filename.
+    Requires valid X-Admin-Key header.
     """
     try:
         ensure_collection_exists()

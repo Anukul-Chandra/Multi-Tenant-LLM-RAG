@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     QDRANT_URL: Optional[str] = None
     QDRANT_API_KEY: Optional[str] = None
     LLAMA_CLOUD_API_KEY: Optional[str] = None
+    ADMIN_API_KEY: Optional[str] = None
 
     GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GEMINI_MODEL: str = "gemini-3.8-flash"
