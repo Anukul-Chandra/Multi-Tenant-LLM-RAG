@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.chat import router as chat_router
 from app.api.ingestion import router as ingestion_router
@@ -24,6 +25,9 @@ app.add_middleware(
 
 app.include_router(ingestion_router)
 app.include_router(chat_router)
+
+# Mount static files directory so /static/widget.js and other assets are publicly accessible
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
