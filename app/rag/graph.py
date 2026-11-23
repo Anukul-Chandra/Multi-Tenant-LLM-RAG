@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -7,6 +8,8 @@ from langgraph.graph import END, START, StateGraph
 from app.core.config import settings
 from app.core.qdrant import COLLECTION_NAME, client
 from app.rag.state import GraphState
+
+logger = logging.getLogger(__name__)
 
 # Fast grading & verification LLM
 groq_llm = ChatGroq(
@@ -128,7 +131,15 @@ async def generate(state: GraphState) -> Dict[str, Any]:
         SystemMessage(content="Answer ONLY using the provided context. Do not use outside knowledge."),
         HumanMessage(content=f"Context:\n{context_text}\n\nQuestion: {question}"),
     ]
-    response = await gemini_llm.ainvoke(messages)
+
+    try:
+        response = await gemini_llm.ainvoke(messages)
+    except Exception as e:
+        warning_msg = f"Gemini unavailable, falling back to Groq: {e}"
+        print(f"[Generation] Warning: {warning_msg}")
+        logger.warning(warning_msg)
+        response = await groq_llm.ainvoke(messages)
+
     generation = str(response.content)
 
     # Collect unique sources preserving order
