@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any, Dict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -32,6 +33,59 @@ embeddings = GoogleGenerativeAIEmbeddings(
     google_api_key=settings.GEMINI_API_KEY,
     output_dimensionality=768,
 )
+
+# Small-talk regex patterns for zero-latency instant routing
+GREETINGS_PATTERN = r"^(hi|hello|hey|hola|hey\s*there|hi\s*there|hello\s*there|assalamu\s*alaikum|assalamualaikum|good\s*(morning|afternoon|evening|day)|greetings|howdy|yo|sup)$"
+HOW_ARE_YOU_PATTERN = r"^(how\s*are\s*you(\s*doing)?|hows\s*it\s*going|how\s*is\s*it\s*going|whats\s*up)$"
+THANKS_PATTERN = r"^(thanks|thank\s*you|thank\s*you\s*so\s*much|thanks\s*a\s*lot|thx|many\s*thanks)$"
+IDENTITY_PATTERN = r"^(who\s*are\s*you|what\s*are\s*you|what\s*can\s*you\s*do|introduce\s*yourself)$"
+BYE_PATTERN = r"^(bye|goodbye|see\s*you|see\s*ya|cya|have\s*a\s*(good|nice)\s*day)$"
+
+
+def is_small_talk(question: str) -> bool:
+    clean = re.sub(r"[^\w\s]", "", question.strip().lower())
+    clean = re.sub(r"\s+", " ", clean).strip()
+
+    if not clean:
+        return True
+
+    words = clean.split()
+    if len(words) > 7:
+        return False
+
+    for pattern in [GREETINGS_PATTERN, HOW_ARE_YOU_PATTERN, THANKS_PATTERN, IDENTITY_PATTERN, BYE_PATTERN]:
+        if re.match(pattern, clean):
+            return True
+    return False
+
+
+def get_small_talk_reply(question: str, project_id: str = "default") -> str:
+    clean = re.sub(r"[^\w\s]", "", question.strip().lower())
+    clean = re.sub(r"\s+", " ", clean).strip()
+
+    if re.match(THANKS_PATTERN, clean):
+        return "You're very welcome! 😊 Feel free to ask if you have any more questions about the uploaded documents or project."
+    elif re.match(BYE_PATTERN, clean):
+        return "Goodbye! Have a great day, and feel free to return anytime you need help. 👋"
+    elif re.match(HOW_ARE_YOU_PATTERN, clean):
+        return "I'm doing great, thank you for asking! 😊 I'm ready to answer any questions about the documents or experience in this project."
+    elif re.match(IDENTITY_PATTERN, clean):
+        return f"Hey there! 👋 I'm the AI assistant for project '{project_id}'. Ask me anything about the uploaded documents, skills, or experience!"
+    else:
+        return "Hey there! 👋 I'm the AI assistant for this project. Ask me anything about the uploaded documents, skills, or experience!"
+
+
+# Node: greeting_reply
+async def greeting_reply(state: GraphState) -> Dict[str, Any]:
+    question = state["question"]
+    project_id = state.get("project_id") or "default"
+    reply = get_small_talk_reply(question, project_id)
+    return {
+        "generation": reply,
+        "sources": [],
+        "is_grounded": True,
+        "rewritten_question": question,
+    }
 
 
 # Node: rewrite_query
@@ -193,6 +247,13 @@ async def fallback(state: GraphState) -> Dict[str, Any]:
 
 
 # Conditional routing functions
+def route_intent(state: GraphState) -> str:
+    question = state.get("question", "")
+    if is_small_talk(question):
+        return "greeting_reply"
+    return "rewrite_query"
+
+
 def route_after_grading(state: GraphState) -> str:
     if state.get("documents") and len(state["documents"]) > 0:
         return "generate"
@@ -208,6 +269,7 @@ def route_after_hallucination(state: GraphState) -> str:
 # Build and compile StateGraph
 workflow = StateGraph(GraphState)
 
+workflow.add_node("greeting_reply", greeting_reply)
 workflow.add_node("rewrite_query", rewrite_query)
 workflow.add_node("retrieve", retrieve)
 workflow.add_node("grade_documents", grade_documents)
@@ -215,8 +277,19 @@ workflow.add_node("generate", generate)
 workflow.add_node("check_hallucination", check_hallucination)
 workflow.add_node("fallback", fallback)
 
-# Wire edges: START -> rewrite_query -> retrieve -> grade_documents -> ...
-workflow.add_edge(START, "rewrite_query")
+# Wire edges:
+# 1. START -> route_intent (instant greeting reply or rewrite_query)
+workflow.add_conditional_edges(
+    START,
+    route_intent,
+    {
+        "greeting_reply": "greeting_reply",
+        "rewrite_query": "rewrite_query",
+    },
+)
+workflow.add_edge("greeting_reply", END)
+
+# 2. Main RAG Pipeline
 workflow.add_edge("rewrite_query", "retrieve")
 workflow.add_edge("retrieve", "grade_documents")
 workflow.add_conditional_edges(
