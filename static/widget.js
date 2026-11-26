@@ -111,37 +111,62 @@
   root.id = "swiss-rag-widget-root";
   root.style.cssText = "all: initial; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;";
 
-  // Scoped styles for living mascot animation and interactive hover
+  // Scoped styles for living waving mascot animation, floating Hello! text, and responsive sizing
   const styleEl = document.createElement("style");
   styleEl.textContent = `
-    @keyframes botFloat {
+    @keyframes botWave {
       0%, 100% {
-        transform: translateY(0) rotate(-3deg);
+        transform: translateY(0) rotate(0deg);
         filter: drop-shadow(0 6px 14px rgba(0, 229, 255, 0.45));
       }
-      50% {
-        transform: translateY(-8px) rotate(3deg);
-        filter: drop-shadow(0 10px 20px rgba(0, 229, 255, 0.72));
+      20% {
+        transform: translateY(-6px) rotate(-6deg);
+        filter: drop-shadow(0 8px 18px rgba(0, 229, 255, 0.62));
+      }
+      45% {
+        transform: translateY(-9px) rotate(8deg);
+        filter: drop-shadow(0 10px 22px rgba(0, 229, 255, 0.72));
+      }
+      70% {
+        transform: translateY(-4px) rotate(-4deg);
+        filter: drop-shadow(0 8px 18px rgba(0, 229, 255, 0.6));
+      }
+    }
+    @keyframes helloFloat {
+      0%, 100% {
+        opacity: 0;
+        transform: translateY(6px) scale(0.85);
+      }
+      25%, 55% {
+        opacity: 1;
+        transform: translateY(-4px) scale(1.05);
+      }
+      85% {
+        opacity: 0;
+        transform: translateY(-18px) scale(0.95);
       }
     }
     #swiss-rag-launcher-btn.swiss-rag-launcher-mascot {
+      width: 88px;
+      height: 88px;
       background: transparent !important;
       border: none !important;
       box-shadow: none !important;
       padding: 0 !important;
       outline: none !important;
+      overflow: visible !important;
       transition: transform 0.25s ease;
     }
     #swiss-rag-launcher-btn.swiss-rag-launcher-mascot:hover {
       transform: scale(1.12) rotate(5deg);
     }
     #swiss-rag-launcher-btn .swiss-rag-bot-mascot {
-      width: 64px;
-      height: 64px;
+      width: 88px;
+      height: 88px;
       object-fit: contain;
       display: block;
       pointer-events: none;
-      animation: botFloat 2.8s ease-in-out infinite;
+      animation: botWave 2.6s ease-in-out infinite;
       filter: drop-shadow(0 6px 14px rgba(0, 229, 255, 0.45));
       transition: filter 0.25s ease;
     }
@@ -149,15 +174,48 @@
       animation-play-state: paused;
       filter: drop-shadow(0 8px 22px rgba(0, 229, 255, 0.85));
     }
+    #swiss-rag-launcher-btn .swiss-rag-hello-badge {
+      position: absolute;
+      top: -12px;
+      left: -10px;
+      pointer-events: none;
+      white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+      background: linear-gradient(135deg, #00d2ff 0%, #00f5a0 60%, #a8ff78 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 8px rgba(0, 245, 160, 0.55));
+      animation: helloFloat 2.6s ease-in-out infinite;
+      z-index: 2;
+    }
+    @media (max-width: 639px) {
+      #swiss-rag-launcher-btn.swiss-rag-launcher-mascot,
+      #swiss-rag-launcher-btn .swiss-rag-bot-mascot {
+        width: 72px;
+        height: 72px;
+      }
+      #swiss-rag-launcher-btn .swiss-rag-hello-badge {
+        top: -10px;
+        left: -8px;
+        font-size: 13px;
+      }
+    }
   `;
   root.appendChild(styleEl);
 
-  // Floating Toggle Button (Animated Mascot when closed, clean X button when open)
+  // Floating Toggle Button (Animated Mascot + Hello! badge when closed, clean X button when open)
   const btn = document.createElement("button");
   btn.id = "swiss-rag-launcher-btn";
   btn.setAttribute("aria-label", "Toggle AI Chat");
 
-  const botAvatarImg = `<img class="swiss-rag-bot-mascot" src="${escapeHtml(iconUrl)}" alt="${escapeHtml(title)}" />`;
+  const botAvatarImg = `
+    <span class="swiss-rag-hello-badge">Hello!</span>
+    <img class="swiss-rag-bot-mascot" src="${escapeHtml(iconUrl)}" alt="${escapeHtml(title)}" />
+  `;
   const closeIcon = `
     <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
@@ -195,8 +253,6 @@
         position: fixed;
         bottom: 24px;
         right: 24px;
-        width: 64px;
-        height: 64px;
         border-radius: 0;
         background: transparent;
         border: none;
