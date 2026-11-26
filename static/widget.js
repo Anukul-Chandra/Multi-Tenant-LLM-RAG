@@ -50,15 +50,15 @@
       .replace(/'/g, "&#039;");
   }
 
-  // Extract clean visible text from the host webpage (excluding scripts, styles, and this widget)
+  // Extract clean visible text from the host webpage (excluding scripts, styles, noscript, svg, and this widget)
   function getPageContext() {
     try {
       if (!document.body) return "";
       const clone = document.body.cloneNode(true);
-      const unwanted = clone.querySelectorAll("script, style, noscript, #swiss-rag-widget-root");
+      const unwanted = clone.querySelectorAll("script, style, noscript, svg, #swiss-rag-widget-root");
       unwanted.forEach((el) => el.remove());
       const rawText = clone.innerText || clone.textContent || "";
-      return rawText.replace(/\s+/g, " ").trim().slice(0, 4000);
+      return rawText.replace(/\s+/g, " ").trim().slice(0, 15000);
     } catch (e) {
       return "";
     }

@@ -105,9 +105,10 @@ def _build_combined_context(documents: List[Dict[str, Any]], page_context: str) 
     clean_page = (page_context or "").strip()
     page_section = clean_page if clean_page else "No live webpage context available."
 
-    if documents:
+    uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
+    if uploaded_docs:
         docs_section = "\n\n".join(
-            [f"Document [Source: {doc['source']}]:\n{doc['text']}" for doc in documents]
+            [f"Document [Source: {doc['source']}]:\n{doc['text']}" for doc in uploaded_docs]
         )
     else:
         docs_section = "No relevant uploaded documents retrieved."
@@ -155,6 +156,8 @@ async def rewrite_query(state: GraphState) -> Dict[str, Any]:
 async def retrieve(state: GraphState) -> Dict[str, Any]:
     query_text = state.get("rewritten_question") or state["question"]
     project_id = state.get("project_id") or "default"
+    page_context = (state.get("page_context") or "").strip()
+    documents: List[Dict[str, Any]] = []
 
     try:
         query_vector = await asyncio.wait_for(embeddings.aembed_query(query_text), timeout=15)
@@ -189,18 +192,25 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
 
         points = await asyncio.wait_for(asyncio.to_thread(_search_qdrant), timeout=15)
 
-        documents = []
         for pt in points:
             payload = pt.payload or {}
             text = payload.get("text", "")
             source = payload.get("source", "unknown")
             if text:
                 documents.append({"text": text, "source": source})
-
-        return {"documents": documents}
     except Exception as exc:
         logger.warning(f"Qdrant retrieval failed for project '{project_id}': {exc}")
-        return {"documents": []}
+
+    # Treat live webpage context as a first-class retrieved document before CRAG grading
+    if page_context:
+        documents.append(
+            {
+                "text": f"[Source: Live Page]\n{page_context}",
+                "source": "Live Page",
+            }
+        )
+
+    return {"documents": documents}
 
 
 # Node b: grade_documents (CRAG)
@@ -270,7 +280,8 @@ async def generate(state: GraphState) -> Dict[str, Any]:
         return {"generation": FALLBACK_ANSWER, "sources": []}
 
     # Collect unique Qdrant PDF sources preserving order, plus "Live Page" if page_context is present
-    sources = list(dict.fromkeys([doc["source"] for doc in documents if doc.get("source")]))
+    uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
+    sources = list(dict.fromkeys([doc["source"] for doc in uploaded_docs if doc.get("source")]))
     if page_context:
         sources.append("Live Page")
 
@@ -280,6 +291,7 @@ async def generate(state: GraphState) -> Dict[str, Any]:
 # Node d: check_hallucination (Self-RAG)
 async def check_hallucination(state: GraphState) -> Dict[str, Any]:
     documents = state.get("documents", [])
+    uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
     page_context = (state.get("page_context") or "").strip()
     generation = state.get("generation", "")
     current_sources = list(state.get("sources", []))
@@ -288,7 +300,7 @@ async def check_hallucination(state: GraphState) -> Dict[str, Any]:
         return {"is_grounded": True, "sources": []}
 
     context_text = _build_combined_context(documents, page_context)
-    both_present = bool(documents) and bool(page_context)
+    both_present = bool(uploaded_docs) and bool(page_context)
 
     if both_present:
         prompt = (
