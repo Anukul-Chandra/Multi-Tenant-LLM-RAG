@@ -87,7 +87,7 @@ async def chat(request: ChatRequest):
     # 2. Main LangGraph CRAG + Self-RAG Pipeline
     try:
         chat_history = list(SESSION_STORE.get(session_id, []))
-        page_context = (request.page_context or "").strip()[:16000]
+        page_context = (request.page_context or "").strip()[:8000]
 
         initial_state = {
             "question": request.question.strip(),

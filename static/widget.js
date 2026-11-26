@@ -60,7 +60,7 @@
       const unwanted = clone.querySelectorAll("script, style, noscript, svg, #swiss-rag-widget-root");
       unwanted.forEach((el) => el.remove());
       const rawText = clone.innerText || clone.textContent || "";
-      return rawText.replace(/\s+/g, " ").trim().slice(0, 15000);
+      return rawText.replace(/\s+/g, " ").trim().slice(0, 8000);
     } catch (e) {
       return "";
     }
@@ -397,7 +397,7 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
 
     try {
       const res = await fetch(`${apiUrl}/api/v1/chat`, {
@@ -454,7 +454,7 @@
       const errMsg = document.createElement("div");
       errMsg.style.cssText = "align-self: flex-start; max-width: 85%; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 12px; padding: 10px 12px; font-size: 12px;";
       if (err && err.name === "AbortError") {
-        errMsg.innerText = "Request timed out after 30s. Please try again.";
+        errMsg.innerText = "Request timed out after 45s. Please try again.";
       } else {
         errMsg.innerText = (err && err.message) ? err.message : "Network error. Please try again.";
       }

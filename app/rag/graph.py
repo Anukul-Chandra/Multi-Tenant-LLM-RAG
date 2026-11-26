@@ -21,8 +21,8 @@ groq_llm = ChatGroq(
     model=settings.GROQ_MODEL,
     temperature=0,
     api_key=settings.GROQ_API_KEY,
-    timeout=20,
-    max_retries=1,
+    timeout=15,
+    max_retries=0,
 )
 
 # High-accuracy answer generation LLM
@@ -30,8 +30,8 @@ gemini_llm = ChatGoogleGenerativeAI(
     model=settings.GEMINI_MODEL,
     temperature=0,
     google_api_key=settings.GEMINI_API_KEY,
-    timeout=20,
-    max_retries=1,
+    timeout=15,
+    max_retries=0,
 )
 
 # Query embedding model
@@ -157,6 +157,7 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
     query_text = state.get("rewritten_question") or state["question"]
     project_id = state.get("project_id") or "default"
     page_context = (state.get("page_context") or "").strip()
+    search_limit = 3 if page_context else 4
     documents: List[Dict[str, Any]] = []
 
     try:
@@ -178,7 +179,7 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
                     collection_name=COLLECTION_NAME,
                     query=query_vector,
                     query_filter=query_filter,
-                    limit=4,
+                    limit=search_limit,
                     with_payload=True,
                 )
                 return search_result.points
@@ -186,7 +187,7 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
                 collection_name=COLLECTION_NAME,
                 query_vector=query_vector,
                 query_filter=query_filter,
-                limit=4,
+                limit=search_limit,
                 with_payload=True,
             )
 
@@ -200,15 +201,6 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
                 documents.append({"text": text, "source": source})
     except Exception as exc:
         logger.warning(f"Qdrant retrieval failed for project '{project_id}': {exc}")
-
-    # Treat live webpage context as a first-class retrieved document before CRAG grading
-    if page_context:
-        documents.append(
-            {
-                "text": f"[Source: Live Page]\n{page_context}",
-                "source": "Live Page",
-            }
-        )
 
     return {"documents": documents}
 
@@ -277,13 +269,14 @@ async def generate(state: GraphState) -> Dict[str, Any]:
     generation = _strip_think_tags(str(response.content))
 
     if FALLBACK_ANSWER.lower() in generation.lower():
-        return {"generation": FALLBACK_ANSWER, "sources": []}
+        return {"generation": FALLBACK_ANSWER, "sources": [], "is_grounded": True}
 
     # Collect unique Qdrant PDF sources preserving order, plus "Live Page" if page_context is present
     uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
     sources = list(dict.fromkeys([doc["source"] for doc in uploaded_docs if doc.get("source")]))
     if page_context:
         sources.append("Live Page")
+        return {"generation": generation, "sources": sources, "is_grounded": True}
 
     return {"generation": generation, "sources": sources}
 
@@ -362,12 +355,24 @@ def route_intent(state: GraphState) -> str:
     return "rewrite_query"
 
 
+def route_after_retrieve(state: GraphState) -> str:
+    if (state.get("page_context") or "").strip():
+        return "generate"
+    return "grade_documents"
+
+
 def route_after_grading(state: GraphState) -> str:
     has_docs = bool(state.get("documents"))
     has_page_context = bool((state.get("page_context") or "").strip())
     if has_docs or has_page_context:
         return "generate"
     return "fallback"
+
+
+def route_after_generation(state: GraphState) -> str:
+    if (state.get("page_context") or "").strip():
+        return END
+    return "check_hallucination"
 
 
 def route_after_hallucination(state: GraphState) -> str:
@@ -399,9 +404,16 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("greeting_reply", END)
 
-# 2. Main RAG Pipeline
+# 2. Main RAG Pipeline (Fast hybrid single-pass when page_context is present; full CRAG + Self-RAG otherwise)
 workflow.add_edge("rewrite_query", "retrieve")
-workflow.add_edge("retrieve", "grade_documents")
+workflow.add_conditional_edges(
+    "retrieve",
+    route_after_retrieve,
+    {
+        "generate": "generate",
+        "grade_documents": "grade_documents",
+    },
+)
 workflow.add_conditional_edges(
     "grade_documents",
     route_after_grading,
@@ -410,7 +422,14 @@ workflow.add_conditional_edges(
         "fallback": "fallback",
     },
 )
-workflow.add_edge("generate", "check_hallucination")
+workflow.add_conditional_edges(
+    "generate",
+    route_after_generation,
+    {
+        END: END,
+        "check_hallucination": "check_hallucination",
+    },
+)
 workflow.add_conditional_edges(
     "check_hallucination",
     route_after_hallucination,
