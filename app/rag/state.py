@@ -11,3 +11,5 @@ class GraphState(TypedDict):
     sources: List[str]
     is_grounded: bool
     project_id: str
+    qdrant_ms: float
+    llm_ms: float

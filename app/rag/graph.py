@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from typing import Any, Dict, List
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -16,7 +17,29 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_ANSWER = "I do not have that information in our official documents."
 
-# Fast grading & verification LLM
+STOPWORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "can", "may", "might", "must", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "about", "as", "into", "through", "and", "or",
+    "but", "if", "so", "than", "that", "this", "these", "those", "it", "its",
+    "he", "she", "they", "we", "you", "i", "me", "my", "your", "his", "her",
+    "their", "our", "what", "which", "who", "whom", "whose", "where", "when",
+    "why", "how", "all", "any", "some", "no", "not", "tell", "give", "show",
+    "list", "please", "does", "more", "explain", "describe",
+}
+
+# Ultra-fast primary generator LLM
+fast_generator_llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    temperature=0.2,
+    max_tokens=350,
+    api_key=settings.GROQ_API_KEY,
+    timeout=15,
+    max_retries=0,
+)
+
+# Grading & verification LLM (for pure-Qdrant CRAG / Self-RAG mode)
 groq_llm = ChatGroq(
     model=settings.GROQ_MODEL,
     temperature=0,
@@ -25,7 +48,7 @@ groq_llm = ChatGroq(
     max_retries=0,
 )
 
-# High-accuracy answer generation LLM
+# Fallback answer generation LLM
 gemini_llm = ChatGoogleGenerativeAI(
     model=settings.GEMINI_MODEL,
     temperature=0,
@@ -100,10 +123,86 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", str(text or ""), flags=re.DOTALL).strip()
 
 
-def _build_combined_context(documents: List[Dict[str, Any]], page_context: str) -> str:
-    """Builds clearly separated prompt sections for live webpage and Qdrant document contexts."""
+def _filter_page_context(page_context: str, question: str, max_chars: int = 3500) -> str:
+    """
+    0ms local Python smart filter: splits page_context into overlapping ~600-char chunks,
+    scores by case-insensitive keyword overlap with the question (excluding stopwords),
+    and returns the intro chunk + top 4 scoring chunks (capped at max_chars).
+    """
     clean_page = (page_context or "").strip()
-    page_section = clean_page if clean_page else "No live webpage context available."
+    if not clean_page:
+        return ""
+    if len(clean_page) <= max_chars:
+        return clean_page
+
+    # Build overlapping ~600-character chunks (step=480, overlap=120)
+    chunk_size = 600
+    step = 480
+    chunks: List[str] = []
+    start = 0
+    text_len = len(clean_page)
+    while start < text_len:
+        end = min(start + chunk_size, text_len)
+        chunks.append(clean_page[start:end])
+        if end >= text_len:
+            break
+        start += step
+
+    if not chunks:
+        return clean_page[:max_chars]
+
+    # Extract non-stopword query keywords
+    raw_tokens = re.findall(r"[a-z0-9]+", (question or "").lower())
+    keywords = [t for t in dict.fromkeys(raw_tokens) if t not in STOPWORDS and len(t) > 1]
+
+    # Score remaining chunks (idx >= 1); chunk 0 (intro) is always included
+    scored_rest = []
+    for idx in range(1, len(chunks)):
+        chunk_lower = chunks[idx].lower()
+        chunk_words = set(re.findall(r"[a-z0-9]+", chunk_lower))
+        unique_hits = 0
+        total_hits = 0
+        for kw in keywords:
+            if kw in chunk_words:
+                unique_hits += 1
+                total_hits += 2
+            elif len(kw) >= 4 and kw in chunk_lower:
+                unique_hits += 1
+                total_hits += 1
+        scored_rest.append((unique_hits, total_hits, -idx, idx))
+
+    scored_rest.sort(reverse=True)
+    selected_indices = {0}
+    for _, _, _, idx in scored_rest[:4]:
+        selected_indices.add(idx)
+
+    # Preserve document order and respect max_chars budget
+    selected_parts: List[str] = []
+    running_len = 0
+    for idx in sorted(selected_indices):
+        part = chunks[idx].strip()
+        if not part:
+            continue
+        sep_len = 5 if selected_parts else 0  # "\n...\n"
+        if running_len + sep_len + len(part) > max_chars:
+            remaining = max_chars - running_len - sep_len
+            if remaining > 80:
+                selected_parts.append(part[:remaining])
+            break
+        selected_parts.append(part)
+        running_len += sep_len + len(part)
+
+    return "\n...\n".join(selected_parts)
+
+
+def _build_combined_context(
+    documents: List[Dict[str, Any]],
+    page_context: str,
+    question: str = "",
+) -> str:
+    """Builds clearly separated prompt sections for filtered live webpage and Qdrant document contexts."""
+    filtered_page = _filter_page_context(page_context, question)
+    page_section = filtered_page if filtered_page else "No live webpage context available."
 
     uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
     if uploaded_docs:
@@ -123,8 +222,10 @@ def _build_combined_context(documents: List[Dict[str, Any]], page_context: str) 
 async def rewrite_query(state: GraphState) -> Dict[str, Any]:
     question = state["question"]
     chat_history = state.get("chat_history") or []
+    page_context = (state.get("page_context") or "").strip()
 
-    if not chat_history:
+    # Keep Hybrid Mode single-pass (0 extra LLM calls before generate)
+    if not chat_history or page_context:
         return {"rewritten_question": question}
 
     recent_history = chat_history[-4:]
@@ -154,14 +255,13 @@ async def rewrite_query(state: GraphState) -> Dict[str, Any]:
 
 # Node a: retrieve
 async def retrieve(state: GraphState) -> Dict[str, Any]:
+    t0 = time.perf_counter()
     query_text = state.get("rewritten_question") or state["question"]
     project_id = state.get("project_id") or "default"
-    page_context = (state.get("page_context") or "").strip()
-    search_limit = 3 if page_context else 4
     documents: List[Dict[str, Any]] = []
 
-    try:
-        query_vector = await asyncio.wait_for(embeddings.aembed_query(query_text), timeout=15)
+    async def _run_vector_search() -> List[Dict[str, Any]]:
+        query_vector = await embeddings.aembed_query(query_text)
 
         # Strict multi-tenancy isolation filter on project_id
         query_filter = models.Filter(
@@ -179,7 +279,7 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
                     collection_name=COLLECTION_NAME,
                     query=query_vector,
                     query_filter=query_filter,
-                    limit=search_limit,
+                    limit=2,
                     with_payload=True,
                 )
                 return search_result.points
@@ -187,22 +287,28 @@ async def retrieve(state: GraphState) -> Dict[str, Any]:
                 collection_name=COLLECTION_NAME,
                 query_vector=query_vector,
                 query_filter=query_filter,
-                limit=search_limit,
+                limit=2,
                 with_payload=True,
             )
 
-        points = await asyncio.wait_for(asyncio.to_thread(_search_qdrant), timeout=15)
-
+        points = await asyncio.to_thread(_search_qdrant)
+        docs = []
         for pt in points:
             payload = pt.payload or {}
             text = payload.get("text", "")
             source = payload.get("source", "unknown")
             if text:
-                documents.append({"text": text, "source": source})
-    except Exception as exc:
-        logger.warning(f"Qdrant retrieval failed for project '{project_id}': {exc}")
+                docs.append({"text": text, "source": source})
+        return docs
 
-    return {"documents": documents}
+    try:
+        # Strict 5-second timeout so vector search never stalls the response
+        documents = await asyncio.wait_for(_run_vector_search(), timeout=5.0)
+    except Exception as exc:
+        logger.warning(f"Qdrant retrieval failed or timed out for project '{project_id}': {exc}")
+
+    qdrant_ms = round((time.perf_counter() - t0) * 1000, 1)
+    return {"documents": documents, "qdrant_ms": qdrant_ms}
 
 
 # Node b: grade_documents (CRAG)
@@ -238,18 +344,20 @@ async def grade_documents(state: GraphState) -> Dict[str, Any]:
 
 # Node c: generate
 async def generate(state: GraphState) -> Dict[str, Any]:
+    t0 = time.perf_counter()
     documents = state.get("documents", [])
     page_context = (state.get("page_context") or "").strip()
     question = state["question"]
 
-    context_text = _build_combined_context(documents, page_context)
+    context_text = _build_combined_context(documents, page_context, question=question)
 
     system_prompt = (
-        "You are an accurate AI assistant. Answer the user's question strictly and ONLY using the "
+        "You are an accurate, concise AI assistant. Answer the user's question strictly and ONLY using the "
         "combined context provided below (LIVE WEBPAGE CONTEXT and UPLOADED DOCUMENTS CONTEXT).\n"
         "Rules:\n"
         "- Do NOT use any outside knowledge or fabricate facts.\n"
         "- Use information from the Live Webpage Context, the Uploaded Documents Context, or both.\n"
+        "- Keep answers concise, structured, and easy to read.\n"
         f"- Only if NEITHER the Live Webpage Context nor the Uploaded Documents Context contains the answer, respond strictly with: \"{FALLBACK_ANSWER}\""
     )
 
@@ -259,26 +367,27 @@ async def generate(state: GraphState) -> Dict[str, Any]:
     ]
 
     try:
-        response = await gemini_llm.ainvoke(messages)
+        response = await fast_generator_llm.ainvoke(messages)
     except Exception as e:
-        warning_msg = f"Gemini unavailable, falling back to Groq: {e}"
+        warning_msg = f"Groq primary generator unavailable, falling back to Gemini: {e}"
         print(f"[Generation] Warning: {warning_msg}")
         logger.warning(warning_msg)
-        response = await groq_llm.ainvoke(messages)
+        response = await gemini_llm.ainvoke(messages)
 
+    llm_ms = round((time.perf_counter() - t0) * 1000, 1)
     generation = _strip_think_tags(str(response.content))
 
     if FALLBACK_ANSWER.lower() in generation.lower():
-        return {"generation": FALLBACK_ANSWER, "sources": [], "is_grounded": True}
+        return {"generation": FALLBACK_ANSWER, "sources": [], "is_grounded": True, "llm_ms": llm_ms}
 
     # Collect unique Qdrant PDF sources preserving order, plus "Live Page" if page_context is present
     uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
     sources = list(dict.fromkeys([doc["source"] for doc in uploaded_docs if doc.get("source")]))
     if page_context:
         sources.append("Live Page")
-        return {"generation": generation, "sources": sources, "is_grounded": True}
+        return {"generation": generation, "sources": sources, "is_grounded": True, "llm_ms": llm_ms}
 
-    return {"generation": generation, "sources": sources}
+    return {"generation": generation, "sources": sources, "llm_ms": llm_ms}
 
 
 # Node d: check_hallucination (Self-RAG)
@@ -286,13 +395,14 @@ async def check_hallucination(state: GraphState) -> Dict[str, Any]:
     documents = state.get("documents", [])
     uploaded_docs = [doc for doc in documents if doc.get("source") != "Live Page"]
     page_context = (state.get("page_context") or "").strip()
+    question = state.get("question", "")
     generation = state.get("generation", "")
     current_sources = list(state.get("sources", []))
 
     if FALLBACK_ANSWER.lower() in generation.strip().lower():
         return {"is_grounded": True, "sources": []}
 
-    context_text = _build_combined_context(documents, page_context)
+    context_text = _build_combined_context(documents, page_context, question=question)
     both_present = bool(uploaded_docs) and bool(page_context)
 
     if both_present:

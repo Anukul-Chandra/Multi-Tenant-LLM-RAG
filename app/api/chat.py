@@ -1,8 +1,12 @@
+import logging
 import re
+import time
 from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from app.rag.graph import rag_app
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
@@ -53,6 +57,7 @@ async def chat(request: ChatRequest):
             detail="Question cannot be empty.",
         )
 
+    total_start = time.perf_counter()
     session_id = request.session_id.strip() if request.session_id else "default"
     project_id = request.project_id.strip() if request.project_id else "default"
 
@@ -87,7 +92,7 @@ async def chat(request: ChatRequest):
     # 2. Main LangGraph CRAG + Self-RAG Pipeline
     try:
         chat_history = list(SESSION_STORE.get(session_id, []))
-        page_context = (request.page_context or "").strip()[:8000]
+        page_context = (request.page_context or "").strip()[:18000]
 
         initial_state = {
             "question": request.question.strip(),
@@ -99,6 +104,8 @@ async def chat(request: ChatRequest):
             "sources": [],
             "is_grounded": False,
             "project_id": project_id,
+            "qdrant_ms": 0.0,
+            "llm_ms": 0.0,
         }
 
         final_state = await rag_app.ainvoke(initial_state)
@@ -107,6 +114,16 @@ async def chat(request: ChatRequest):
         rewritten_question = final_state.get("rewritten_question", request.question.strip())
         sources = final_state.get("sources", [])
         is_grounded = final_state.get("is_grounded", False)
+        qdrant_ms = float(final_state.get("qdrant_ms", 0.0))
+        llm_ms = float(final_state.get("llm_ms", 0.0))
+        total_ms = round((time.perf_counter() - total_start) * 1000, 1)
+
+        timing_log = (
+            f"[Chat Timing] project={project_id} session={session_id} "
+            f"qdrant_ms={qdrant_ms:.1f} llm_ms={llm_ms:.1f} total_ms={total_ms:.1f}"
+        )
+        logger.info(timing_log)
+        print(timing_log, flush=True)
 
         # Update in-memory session history (keep last 6 messages)
         history = SESSION_STORE.setdefault(session_id, [])
