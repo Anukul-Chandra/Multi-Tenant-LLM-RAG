@@ -26,16 +26,19 @@ app.add_middleware(
 app.include_router(ingestion_router)
 app.include_router(chat_router)
 
-# Mount static files directory so /static/widget.js and other assets are publicly accessible
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Resolve static directory relative to project root
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+if not os.path.exists(STATIC_DIR):
+    STATIC_DIR = "static"
+
+# Mount static files directory so /static/widget.js and /static/bot-avatar.png are publicly accessible
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
 async def root():
     """Serves the lightweight demo single-page application."""
-    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "index.html")
-    if not os.path.exists(html_path):
-        html_path = "static/index.html"
+    html_path = os.path.join(STATIC_DIR, "index.html")
     return FileResponse(html_path)
 
 

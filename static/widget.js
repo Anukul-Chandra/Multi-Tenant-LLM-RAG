@@ -29,7 +29,9 @@
 
   const projectId = (currentScript && currentScript.getAttribute("data-project-id")) || "portfolio";
   const title = (currentScript && currentScript.getAttribute("data-title")) || "Ask AI Assistant";
-  const apiUrl = (currentScript && currentScript.getAttribute("data-api-url")) || defaultApiUrl;
+  const rawApiUrl = (currentScript && currentScript.getAttribute("data-api-url")) || defaultApiUrl;
+  const apiUrl = rawApiUrl.replace(/\/+$/, "");
+  const iconUrl = (currentScript && currentScript.getAttribute("data-icon")) || `${apiUrl}/static/bot-avatar.png`;
 
   // Persistent session_id in sessionStorage
   const storageKey = `swiss_rag_session_${projectId}`;
@@ -109,44 +111,81 @@
   root.id = "swiss-rag-widget-root";
   root.style.cssText = "all: initial; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;";
 
-  // Circular Floating Toggle Button
+  // Floating Toggle Button (Mascot Avatar when closed, clean X button when open)
   const btn = document.createElement("button");
   btn.setAttribute("aria-label", "Toggle AI Chat");
-  btn.style.cssText = `
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: #0f172a;
-    color: #ffffff;
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.35);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 999999;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  `;
-  btn.onmouseover = () => { btn.style.transform = "scale(1.05)"; };
-  btn.onmouseout = () => { btn.style.transform = "scale(1)"; };
 
-  // SVG Icons
-  const chatIcon = `
-    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
-    </svg>
-  `;
-
+  const botAvatarImg = `<img src="${escapeHtml(iconUrl)}" alt="${escapeHtml(title)}" style="width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none;" />`;
   const closeIcon = `
     <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
     </svg>
   `;
 
-  btn.innerHTML = chatIcon;
+  let isOpen = false;
+
+  function renderLauncherButton() {
+    if (isOpen) {
+      btn.style.cssText = `
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: #0f172a;
+        color: #ffffff;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.35);
+        filter: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      `;
+      btn.innerHTML = closeIcon;
+    } else {
+      btn.style.cssText = `
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 60px;
+        height: 60px;
+        border-radius: 0;
+        background: transparent;
+        color: #ffffff;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        box-shadow: none;
+        filter: drop-shadow(0 4px 14px rgba(0, 229, 255, 0.4));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+        transition: transform 0.2s ease, filter 0.2s ease;
+      `;
+      btn.innerHTML = botAvatarImg;
+    }
+  }
+
+  btn.onmouseover = () => {
+    btn.style.transform = "scale(1.07)";
+    if (!isOpen) {
+      btn.style.filter = "drop-shadow(0 6px 18px rgba(0, 229, 255, 0.6))";
+    }
+  };
+  btn.onmouseout = () => {
+    btn.style.transform = "scale(1)";
+    if (!isOpen) {
+      btn.style.filter = "drop-shadow(0 4px 14px rgba(0, 229, 255, 0.4))";
+    }
+  };
+
+  renderLauncherButton();
 
   // Chat Window Popup
   const popup = document.createElement("div");
@@ -172,10 +211,12 @@
     <!-- Header -->
     <div style="background: #0f172a; color: #ffffff; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; border-top-left-radius: 16px; border-top-right-radius: 16px;">
       <div style="display: flex; align-items: center; gap: 10px;">
-        <div style="width: 28px; height: 28px; background: #dc2626; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; color: #ffffff;">+</div>
+        <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.35); overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <img src="${escapeHtml(iconUrl)}" alt="${escapeHtml(title)}" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
+        </div>
         <div>
-          <div style="font-weight: 600; font-size: 14px; line-height: 1.2;">${title}</div>
-          <div style="font-size: 11px; opacity: 0.7;">Project: ${projectId}</div>
+          <div style="font-weight: 600; font-size: 14px; line-height: 1.2;">${escapeHtml(title)}</div>
+          <div style="font-size: 11px; opacity: 0.7;">Project: ${escapeHtml(projectId)}</div>
         </div>
       </div>
       <button id="swiss-rag-close-btn" style="background: transparent; border: none; color: #ffffff; cursor: pointer; opacity: 0.8; padding: 4px; border-radius: 6px; display: flex; align-items: center;">
@@ -188,7 +229,7 @@
     <!-- Messages Container -->
     <div id="swiss-rag-messages" style="flex: 1; overflow-y: auto; padding: 14px; background: #f8fafc; display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.5; color: #1e293b;">
       <div style="align-self: flex-start; max-width: 85%; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; border-top-left-radius: 2px; padding: 10px 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
-        Hello! I can answer questions grounded in official <strong>${projectId}</strong> documents. How can I help?
+        Hello! I can answer questions grounded in official <strong>${escapeHtml(projectId)}</strong> documents. How can I help?
       </div>
     </div>
 
@@ -218,11 +259,10 @@
   document.body.appendChild(root);
 
   // Toggle Popup Visibility
-  let isOpen = false;
   function toggleWidget() {
     isOpen = !isOpen;
     popup.style.display = isOpen ? "flex" : "none";
-    btn.innerHTML = isOpen ? closeIcon : chatIcon;
+    renderLauncherButton();
     if (isOpen) {
       setTimeout(() => {
         const inp = popup.querySelector("#swiss-rag-input");
