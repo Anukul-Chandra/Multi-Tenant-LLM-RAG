@@ -111,11 +111,53 @@
   root.id = "swiss-rag-widget-root";
   root.style.cssText = "all: initial; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;";
 
-  // Floating Toggle Button (Mascot Avatar when closed, clean X button when open)
+  // Scoped styles for living mascot animation and interactive hover
+  const styleEl = document.createElement("style");
+  styleEl.textContent = `
+    @keyframes botFloat {
+      0%, 100% {
+        transform: translateY(0) rotate(-3deg);
+        filter: drop-shadow(0 6px 14px rgba(0, 229, 255, 0.45));
+      }
+      50% {
+        transform: translateY(-8px) rotate(3deg);
+        filter: drop-shadow(0 10px 20px rgba(0, 229, 255, 0.72));
+      }
+    }
+    #swiss-rag-launcher-btn.swiss-rag-launcher-mascot {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      outline: none !important;
+      transition: transform 0.25s ease;
+    }
+    #swiss-rag-launcher-btn.swiss-rag-launcher-mascot:hover {
+      transform: scale(1.12) rotate(5deg);
+    }
+    #swiss-rag-launcher-btn .swiss-rag-bot-mascot {
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      display: block;
+      pointer-events: none;
+      animation: botFloat 2.8s ease-in-out infinite;
+      filter: drop-shadow(0 6px 14px rgba(0, 229, 255, 0.45));
+      transition: filter 0.25s ease;
+    }
+    #swiss-rag-launcher-btn:hover .swiss-rag-bot-mascot {
+      animation-play-state: paused;
+      filter: drop-shadow(0 8px 22px rgba(0, 229, 255, 0.85));
+    }
+  `;
+  root.appendChild(styleEl);
+
+  // Floating Toggle Button (Animated Mascot when closed, clean X button when open)
   const btn = document.createElement("button");
+  btn.id = "swiss-rag-launcher-btn";
   btn.setAttribute("aria-label", "Toggle AI Chat");
 
-  const botAvatarImg = `<img src="${escapeHtml(iconUrl)}" alt="${escapeHtml(title)}" style="width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none;" />`;
+  const botAvatarImg = `<img class="swiss-rag-bot-mascot" src="${escapeHtml(iconUrl)}" alt="${escapeHtml(title)}" />`;
   const closeIcon = `
     <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
@@ -126,6 +168,7 @@
 
   function renderLauncherButton() {
     if (isOpen) {
+      btn.className = "";
       btn.style.cssText = `
         position: fixed;
         bottom: 24px;
@@ -139,49 +182,44 @@
         padding: 0;
         cursor: pointer;
         box-shadow: 0 4px 14px rgba(15, 23, 42, 0.35);
-        filter: none;
         display: flex;
         align-items: center;
         justify-content: center;
         z-index: 999999;
-        transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
       `;
       btn.innerHTML = closeIcon;
     } else {
+      btn.className = "swiss-rag-launcher-mascot";
       btn.style.cssText = `
         position: fixed;
         bottom: 24px;
         right: 24px;
-        width: 60px;
-        height: 60px;
+        width: 64px;
+        height: 64px;
         border-radius: 0;
         background: transparent;
-        color: #ffffff;
         border: none;
         padding: 0;
         cursor: pointer;
         box-shadow: none;
-        filter: drop-shadow(0 4px 14px rgba(0, 229, 255, 0.4));
         display: flex;
         align-items: center;
         justify-content: center;
         z-index: 999999;
-        transition: transform 0.2s ease, filter 0.2s ease;
       `;
       btn.innerHTML = botAvatarImg;
     }
   }
 
   btn.onmouseover = () => {
-    btn.style.transform = "scale(1.07)";
-    if (!isOpen) {
-      btn.style.filter = "drop-shadow(0 6px 18px rgba(0, 229, 255, 0.6))";
+    if (isOpen) {
+      btn.style.transform = "scale(1.06)";
     }
   };
   btn.onmouseout = () => {
-    btn.style.transform = "scale(1)";
-    if (!isOpen) {
-      btn.style.filter = "drop-shadow(0 4px 14px rgba(0, 229, 255, 0.4))";
+    if (isOpen) {
+      btn.style.transform = "scale(1)";
     }
   };
 
