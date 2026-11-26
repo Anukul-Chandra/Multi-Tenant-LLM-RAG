@@ -39,6 +39,31 @@
     sessionStorage.setItem(storageKey, sessionId);
   }
 
+  // Escape HTML special characters for safe badge rendering
+  function escapeHtml(text) {
+    if (!text) return "";
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // Extract clean visible text from the host webpage (excluding scripts, styles, and this widget)
+  function getPageContext() {
+    try {
+      if (!document.body) return "";
+      const clone = document.body.cloneNode(true);
+      const unwanted = clone.querySelectorAll("script, style, noscript, #swiss-rag-widget-root");
+      unwanted.forEach((el) => el.remove());
+      const rawText = clone.innerText || clone.textContent || "";
+      return rawText.replace(/\s+/g, " ").trim().slice(0, 4000);
+    } catch (e) {
+      return "";
+    }
+  }
+
   // Lightweight Markdown Formatter
   function formatMarkdown(text) {
     if (!text) return "";
@@ -237,55 +262,72 @@
     messagesEl.appendChild(thinkingEl);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     try {
       const res = await fetch(`${apiUrl}/api/v1/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           question: query,
           project_id: projectId,
           session_id: sessionId,
+          page_context: getPageContext(),
         }),
       });
 
-      const data = await res.json();
-      thinkingEl.remove();
-
-      if (res.ok) {
-        const aiMsg = document.createElement("div");
-        aiMsg.style.cssText = "align-self: flex-start; max-width: 90%; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; border-top-left-radius: 2px; padding: 10px 12px; font-size: 13px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); word-break: break-word;";
-
-        let badgesHtml = "";
-        if (data.grounded) {
-          badgesHtml += `<span style="display: inline-block; background: #dcfce7; color: #166534; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; border: 1px solid #bbf7d0; margin-right: 4px;">✓ Grounded</span>`;
-        } else {
-          badgesHtml += `<span style="display: inline-block; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; border: 1px solid #fde68a; margin-right: 4px;">⚠ Fallback</span>`;
+      if (!res.ok) {
+        let errorDetail = `Server error (${res.status}). Please try again.`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.detail) {
+            errorDetail = errData.detail;
+          }
+        } catch (_) {
+          // Non-JSON error response (e.g., 502/504 HTML gateway page)
         }
-
-        if (data.sources && data.sources.length > 0) {
-          badgesHtml += data.sources.map(s => 
-            `<span style="display: inline-block; background: #f1f5f9; color: #475569; font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid #e2e8f0; margin-right: 4px;">📄 ${s}</span>`
-          ).join("");
-        }
-
-        aiMsg.innerHTML = `
-          <div>${formatMarkdown(data.answer)}</div>
-          ${badgesHtml ? `<div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #f1f5f9; display: flex; flex-wrap: wrap; gap: 4px;">${badgesHtml}</div>` : ""}
-        `;
-        messagesEl.appendChild(aiMsg);
-      } else {
-        const errMsg = document.createElement("div");
-        errMsg.style.cssText = "align-self: flex-start; max-width: 85%; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 12px; padding: 10px 12px; font-size: 12px;";
-        errMsg.innerText = data.detail || "Error generating response.";
-        messagesEl.appendChild(errMsg);
+        throw new Error(errorDetail);
       }
+
+      const data = await res.json();
+      if (thinkingEl.parentNode) thinkingEl.remove();
+
+      const aiMsg = document.createElement("div");
+      aiMsg.style.cssText = "align-self: flex-start; max-width: 90%; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; border-top-left-radius: 2px; padding: 10px 12px; font-size: 13px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); word-break: break-word;";
+
+      let badgesHtml = "";
+      if (data.grounded) {
+        badgesHtml += `<span style="display: inline-block; background: #dcfce7; color: #166534; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; border: 1px solid #bbf7d0; margin-right: 4px;">✓ Grounded</span>`;
+      } else {
+        badgesHtml += `<span style="display: inline-block; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; border: 1px solid #fde68a; margin-right: 4px;">⚠ Fallback</span>`;
+      }
+
+      if (data.sources && data.sources.length > 0) {
+        badgesHtml += data.sources.map(s =>
+          `<span style="display: inline-block; background: #f1f5f9; color: #475569; font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid #e2e8f0; margin-right: 4px;">📄 ${escapeHtml(s)}</span>`
+        ).join("");
+      }
+
+      aiMsg.innerHTML = `
+        <div>${formatMarkdown(data.answer)}</div>
+        ${badgesHtml ? `<div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #f1f5f9; display: flex; flex-wrap: wrap; gap: 4px;">${badgesHtml}</div>` : ""}
+      `;
+      messagesEl.appendChild(aiMsg);
     } catch (err) {
-      thinkingEl.remove();
+      if (thinkingEl.parentNode) thinkingEl.remove();
       const errMsg = document.createElement("div");
       errMsg.style.cssText = "align-self: flex-start; max-width: 85%; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 12px; padding: 10px 12px; font-size: 12px;";
-      errMsg.innerText = "Network error. Please try again.";
+      if (err && err.name === "AbortError") {
+        errMsg.innerText = "Request timed out after 30s. Please try again.";
+      } else {
+        errMsg.innerText = (err && err.message) ? err.message : "Network error. Please try again.";
+      }
       messagesEl.appendChild(errMsg);
     } finally {
+      clearTimeout(timeoutId);
+      if (thinkingEl.parentNode) thinkingEl.remove();
       submitBtn.disabled = false;
       submitBtn.style.opacity = "1";
       messagesEl.scrollTop = messagesEl.scrollHeight;

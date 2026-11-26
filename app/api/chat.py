@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List
+from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from app.rag.graph import rag_app
@@ -37,6 +37,7 @@ class ChatRequest(BaseModel):
     question: str
     session_id: str = "default"
     project_id: str = "default"
+    page_context: Optional[str] = ""
 
 
 @router.post("/chat")
@@ -86,12 +87,14 @@ async def chat(request: ChatRequest):
     # 2. Main LangGraph CRAG + Self-RAG Pipeline
     try:
         chat_history = list(SESSION_STORE.get(session_id, []))
+        page_context = (request.page_context or "").strip()[:4500]
 
         initial_state = {
             "question": request.question.strip(),
             "chat_history": chat_history,
             "rewritten_question": "",
             "documents": [],
+            "page_context": page_context,
             "generation": "",
             "sources": [],
             "is_grounded": False,
